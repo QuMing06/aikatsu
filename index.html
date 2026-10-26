@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卡片图鉴</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a1e; color: #eee; padding: 20px; }
+  header {
+    position: sticky; top: 0; background: #1a1a1e; padding: 12px 0;
+    z-index: 10; border-bottom: 1px solid #333; margin-bottom: 16px;
+  }
+  .progress { font-size: 15px; color: #aaa; }
+  .progress b { color: #4ade80; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .card { position: relative; cursor: pointer; user-select: none; }
+  .card img {
+    width: 100%; aspect-ratio: 5/7; object-fit: cover; border-radius: 8px;
+    filter: grayscale(100%) brightness(0.5); opacity: 0.5;
+    transition: filter .2s, opacity .2s, transform .1s;
+    display: block; background: #2a2a30;
+  }
+  .card.owned img { filter: none; opacity: 1; }
+  .card:active img { transform: scale(0.96); }
+  .badge {
+    position: absolute; top: 4px; right: 4px;
+    min-width: 24px; height: 24px; padding: 0 6px;
+    border-radius: 12px; border: none; cursor: pointer;
+    background: #4ade80; color: #111; font-weight: 700; font-size: 13px;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,.4);
+  }
+  .card.owned .badge { display: flex; }
+  .badge:active { transform: scale(0.9); }
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-mask.show { display: flex; }
+  .modal { background: #2a2a30; padding: 24px; border-radius: 12px; text-align: center; max-width: 280px; }
+  .modal p { margin-bottom: 18px; font-size: 15px; line-height: 1.5; }
+  .modal .btns { display: flex; gap: 10px; }
+  .modal button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .btn-cancel { background: #444; color: #eee; }
+  .btn-ok { background: #ef4444; color: #fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="progress">
+    已收集 <b id="ownedCount">0</b> / <span id="totalCount">0</span> 种 ·
+    总计 <b id="totalCopies">0</b> 张
+  </div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<div class="modal-mask" id="modalMask">
+  <div class="modal">
+    <p>确定将这张卡的数量清零吗？</p>
+    <div class="btns">
+      <button class="btn-cancel" id="btnCancel">取消</button>
+      <button class="btn-ok" id="btnOk">清零</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 1. 卡片数据：自动生成 0001.jpg ~ 0064.jpg =====
+const CARDS = Array.from({ length: 64 }, (_, i) => {
+  const num = String(i + 1).padStart(4, '0');
+  return {
+    id: num,
+    name: `卡片 ${num}`,
+    image: `images/${num}.jpg`
+  };
+});
+
+// ===== 2. 收藏状态：localStorage 持久化 =====
+const STORAGE_KEY = 'card-collection';
+let counts = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(counts));
+}
+
+// ===== 3. 渲染 =====
+const grid = document.getElementById('grid');
+const ownedCountEl = document.getElementById('ownedCount');
+const totalCountEl = document.getElementById('totalCount');
+const totalCopiesEl = document.getElementById('totalCopies');
+
+function updateStats() {
+  const owned = Object.values(counts).filter(n => n > 0).length;
+  const copies = Object.values(counts).reduce((a, b) => a + b, 0);
+  ownedCountEl.textContent = owned;
+  totalCountEl.textContent = CARDS.length;
+  totalCopiesEl.textContent = copies;
+}
+
+function render() {
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  CARDS.forEach(card => {
+    const el = document.createElement('div');
+    el.className = 'card' + (counts[card.id] > 0 ? ' owned' : '');
+    el.dataset.id = card.id;
+    el.innerHTML = `
+      <img src="${card.image}" alt="${card.name}" loading="lazy">
+      <button class="badge" data-badge="${card.id}">${counts[card.id] || 0}</button>
+    `;
+    frag.appendChild(el);
+  });
+  grid.appendChild(frag);
+  updateStats();
+}
+
+// ===== 4. 交互：点图片 +1，点角标清零（带确认） =====
+grid.addEventListener('click', (e) => {
+  const badge = e.target.closest('.badge');
+  const cardEl = e.target.closest('.card');
+  if (!cardEl) return;
+  const id = cardEl.dataset.id;
+
+  if (badge) {
+    e.stopPropagation();
+    openConfirm(id, cardEl);
+    return;
+  }
+
+  counts[id] = (counts[id] || 0) + 1;
+  save();
+  cardEl.classList.add('owned');
+  cardEl.querySelector('.badge').textContent = counts[id];
+  updateStats();
+});
+
+// ===== 5. 清零确认弹窗 =====
+let pendingClear = null;
+const mask = document.getElementById('modalMask');
+
+function openConfirm(id, cardEl) {
+  pendingClear = { id, cardEl };
+  mask.classList.add('show');
+}
+
+document.getElementById('btnCancel').onclick = () => {
+  pendingClear = null;
+  mask.classList.remove('show');
+};
+
+document.getElementById('btnOk').onclick = () => {
+  if (pendingClear) {
+    const { id, cardEl } = pendingClear;
+    counts[id] = 0;
+    save();
+    cardEl.classList.remove('owned');
+    cardEl.querySelector('.badge').textContent = 0;
+    updateStats();
+  }
+  pendingClear = null;
+  mask.classList.remove('show');
+};
+
+mask.addEventListener('click', (e) => {
+  if (e.target === mask) {
+    pendingClear = null;
+    mask.classList.remove('show');
+  }
+});
+
+render();
+</script>
+</body>
+</html>
